@@ -8,3 +8,10 @@ class TikiModelSerializer(serializers.ModelSerializer):
     class Meta:
         model = TikiModel
         fields = "__all__"
+
+
+class TikiModelGetSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = TikiModel
+        exclude = ('raw_data', )
