@@ -11,6 +11,8 @@ services:
       - .:/code
     ports:
       - "8000:8000"
+    links:
+      - selenium
     depends_on:
       - db
   migration:
@@ -20,3 +22,8 @@ services:
       - .:/code
     depends_on:
       - db
+  selenium:
+    image: selenium/standalone-chrome-debug:latest
+    ports:
+      - 4444:4444
+      - 5900:5900
