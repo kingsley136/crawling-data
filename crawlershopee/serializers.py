@@ -7,7 +7,7 @@ class ShopeeModelSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ShopeeModel
-        fields = "__all__"
+        exclude = ('raw_data',)
 
 
 class ShopeeModelGetSerializer(serializers.ModelSerializer):

@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
-
 from rest_framework import generics, views
 from rest_framework.response import Response
 from selenium.webdriver import DesiredCapabilities
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 
 from crawlershopee.models import ShopeeModel
 from crawlershopee.serializers import ShopeeModelSerializer, ShopeeModelGetSerializer
 
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
-
-import pandas as pd
+from requests.utils import requote_uri
 
 import re
 
@@ -42,33 +43,41 @@ class CrawlerShopeeView(generics.ListAPIView):
 
 class CrawlerShopeeGetData(views.APIView):
 
-    def post(self, request):
+    def crawl_detail(self, url):
         driver = webdriver.Remote(
-            #  Set to: htttp://{selenium-container-name}:port/wd/hub
-            #  In our example, the container is named `selenium`
-            #  and runs on port 4444
             command_executor='http://selenium:4444/wd/hub',
-            # Set to CHROME since we are using the Chrome container
             desired_capabilities=DesiredCapabilities.CHROME,
 
         )
-        for page in range(1, 10):
+        driver.get(url)
+        try:
+            WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.CLASS_NAME, 'qaNIZv')))
+            print("Page is ready!")
+        except TimeoutException:
+            print("Loading took too much time!")
+        try:
+            name_container = driver.find_element_by_class_name("qaNIZv")
+            name = name_container.find_element_by_tag_name("span").text
+            price = driver.find_element_by_class_name("_3n5NQx").text
+            serializer = ShopeeModelSerializer(data={
+                'title': name,
+                'price': price,
+                'raw_data': ""
+            })
+            driver.close()
+            yield serializer
+        except Exception as e:
+            print("error", e)
 
-            url = "http://quotes.toscrape.com/js/page/" + str(page) + "/"
+    def callback(self, res):
+        print(res)
 
-            driver.get(url)
+    def post(self, request):
+        url = requote_uri("https://shopee.vn/search?keyword=" + request.POST.get('keyword'))
 
-            items = len(driver.find_elements_by_class_name("quote"))
+        from crawlershopee.tasks import crawl_web, parse_data
 
-            total = []
-            for item in range(items):
-                quotes = driver.find_elements_by_class_name("quote")
-                for quote in quotes:
-                    quote_text = quote.find_element_by_class_name('text').text
-                    author = quote.find_element_by_class_name('author').text
-                    new = ((quote_text, author))
-                    total.append(new)
-            df = pd.DataFrame(total, columns=['quote', 'author'])
-            df.to_csv('quoted.csv')
-        driver.close()
+        crawl_web.apply_async(kwargs={'url': url}, link=parse_data.s())
+
         return Response({"data": "ok"})

@@ -3,6 +3,10 @@ version: '3'
 services:
   db:
     image: postgres
+
+  redis:
+    image: "redis:alpine"
+
   crawler:
     build: .
     image: crawler-image
@@ -15,6 +19,31 @@ services:
       - selenium
     depends_on:
       - db
+      - redis
+
+  celery:
+    build: .
+    command: celery -A crawler worker -l info
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+      - redis
+
+  flower:
+    image: mher/flower
+    command: ["flower", "--broker=redis://redis:6379/0", "--port=5555"]
+    ports:
+      - 5555:5555
+
+  makemigration:
+    image: crawler-image
+    command: python manage.py makemigrations
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+
   migration:
     image: crawler-image
     command: python manage.py migrate --noinput
@@ -22,6 +51,7 @@ services:
       - .:/code
     depends_on:
       - db
+
   selenium:
     image: selenium/standalone-chrome-debug:latest
     ports:

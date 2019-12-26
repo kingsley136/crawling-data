@@ -38,9 +38,32 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'django_celery_results',
     'crawlertiki',
     'crawlershopee'
 ]
+import logging
+LOGGING = {
+  'version': 1,
+  'handlers': {
+        'logstash': {
+            'level': 'INFO',
+            'class': 'logstash.TCPLogstashHandler',
+            'host': '192.168.0.100',
+            'port': 5000, # Default value: 5959
+            'version': 1, # Version of logstash event schema. Default value: 0 (for backward compatibility of the library)
+            'message_type': 'logstash',  # 'type' field in logstash message. Default value: 'logstash'.
+            'fqdn': True, # Fully qualified domain name. Default value: false.
+            'tags': ['django.request'], # list of tags. Default: None.
+        },
+  },
+  'loggers': {
+        'django.request': {  # Here is the change
+            'handlers': ['logstash'],
+            # 'level': 'DEBUG',
+        }
+    },
+}
 
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
@@ -129,3 +152,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
 
 STATIC_URL = '/static/'
+
+CELERY_BROKER_URL = 'redis://redis:6379'
+CELERY_RESULT_BACKEND = 'redis://redis:6379'
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
