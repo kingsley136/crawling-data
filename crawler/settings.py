@@ -42,14 +42,16 @@ INSTALLED_APPS = [
     'crawlertiki',
     'crawlershopee'
 ]
-import logging
+
+ELK_HOST = '192.168.0.104'
+
 LOGGING = {
   'version': 1,
   'handlers': {
         'logstash': {
             'level': 'INFO',
             'class': 'logstash.TCPLogstashHandler',
-            'host': '192.168.0.100',
+            'host': ELK_HOST,
             'port': 5000, # Default value: 5959
             'version': 1, # Version of logstash event schema. Default value: 0 (for backward compatibility of the library)
             'message_type': 'logstash',  # 'type' field in logstash message. Default value: 'logstash'.

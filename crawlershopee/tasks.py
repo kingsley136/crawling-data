@@ -1,47 +1,186 @@
 from __future__ import absolute_import, unicode_literals
+
+from datetime import datetime, timedelta
+
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver import DesiredCapabilities
 from selenium import webdriver
+
 from logging import getLogger
-import json
+from celery.utils.log import get_task_logger
+from bs4 import BeautifulSoup
+
+import logging
+import time
 
 from crawler import celery_app
 
+elk_logger = getLogger('django.request')
 
-@celery_app.task(bind=True, name='crawl_web')
-def crawl_web(self, url):
-    logger = getLogger('django.request')
+celery_logger = get_task_logger(__name__)
 
-    driver = webdriver.Remote(
+
+def create_driver():
+    return webdriver.Remote(
         command_executor='http://selenium:4444/wd/hub',
         desired_capabilities=DesiredCapabilities.CHROME,
     )
 
-    print('Executing task id {0.id}, args: {0.args!r} kwargs: {0.kwargs!r}'.format(self.request))
 
-    driver.get(url)
-    try:
-        WebDriverWait(driver, 3).until(
-            EC.presence_of_element_located((By.CLASS_NAME, 'shopee-search-item-result__items')))
-        print("Page is ready!")
-        elem = driver.find_element_by_xpath("//*")
-        source_code = elem.get_attribute("innerHTML")
-        response = {
-            "url": url,
-            "raw_data": source_code
+SELENIUM_DRIVER = None
+
+
+def scroll_down_page(driver, speed=100):
+    current_scroll_position, new_height = 0, 1
+    while current_scroll_position <= new_height:
+        current_scroll_position += speed
+        driver.execute_script("window.scrollTo(0, {});".format(current_scroll_position))
+        new_height = driver.execute_script("return document.body.scrollHeight")
+    time.sleep(2)
+
+
+def get_price(price_string):
+    if '-' in price_string:
+        prices = price_string.split('-')
+        min_price = prices[0]
+        max_price = prices[1]
+        return {
+            'min': int(min_price.split('₫')[1].replace('.', '')),
+            'max': int(max_price.split('₫')[1].replace('.', ''))
         }
-    except TimeoutException as exc:
-        print("Load page took too long... Retrying in 5 seconds...")
-        raise self.retry(exc=exc, countdown=5)
+    else:
+        return {
+            'min': int(price_string.split('₫')[1].replace('.', '')),
+            'max': int(price_string.split('₫')[1].replace('.', ''))
+        }
 
-    logger.info(json.dumps(response))
-    driver.close()
+
+@celery_app.task(bind=True, name='get_product_detail')
+def get_product_detail(self, data):
+    logging.warning("Getting product data...")
+    html_doc = data.get('raw_data')
+    if html_doc:
+        soup = BeautifulSoup(html_doc, 'html.parser')
+        categories_html = soup.findAll("a", {"class": "JFOy4z _20XOUy"})
+        categories = []
+        for category_html in categories_html:
+            categories.append(category_html.text)
+        title = soup.findChild("span", {"class": "OSgLcw"})
+        gross_price = soup.findChild("div", {"class": "_3_ISdg"})
+        net_price = soup.findChild("div", {"class": "_3n5NQx"})
+        try:
+            item_info = {
+                "url": data.get('url'),
+                "title": title.text,
+                "gross_price": get_price(gross_price.text) if gross_price else get_price(net_price.text),
+                "net_price": get_price(net_price.text),
+                "categories": categories
+            }
+            elk_logger.info(msg=item_info, extra={
+                'task_id': self.request.root_id
+            })
+            return item_info
+        except AttributeError as exc:
+            print("Error while parsing data, crawl again...")
+            celery_app.send_task(
+                "crawl_url",
+                queue='priority.high',
+                kwargs={
+                    'url': data.get('url'),
+                    'required_class': '_3n5NQx',
+                    'label': 'crawling_product_detail',
+                },
+                countdown=30,
+                link=get_product_detail.s(),
+                expires=datetime.now() + timedelta(days=1)
+            )
+    else:
+        celery_app.send_task(
+            "crawl_url",
+            queue='priority.high',
+            kwargs={
+                'url': data.get('url'),
+                'required_class': '_3n5NQx',
+                'label': 'crawling_product_detail',
+            },
+            countdown=30,
+            link=get_product_detail.s(),
+            expires=datetime.now() + timedelta(days=1)
+        )
+
+
+@celery_app.task(bind=True, name='get_products_url')
+def get_products_url(self, data):
+    # Return list product url from result page crawled
+    html_doc = data.get('raw_data')
+    soup = BeautifulSoup(html_doc, 'html.parser')
+    items_container = soup.findChild("div", {"class": "shopee-search-item-result__items"})
+    item_urls = items_container.find_all('a')
+    urls = []
+    logging.warning("loop...")
+    for item_url in item_urls:
+        celery_app.send_task(
+            "crawl_url",
+            queue='priority.high',
+            kwargs={
+                'url': 'http://shopee.vn' + item_url.get('href'),
+                'required_class': '_3n5NQx',
+                'label': 'crawling_product_detail',
+            },
+            countdown=30,
+            link=get_product_detail.s(),
+            expires=datetime.now() + timedelta(days=1)
+        )
+        urls.append(item_url.get('href'))
+    logging.warning("end loop...")
+
+    response = {
+        'search_url': data.get('url'),
+        'prods_urls': urls
+    }
+    elk_logger.info(response)
+
     return response
 
 
-@celery_app.task(bind=True, name='parse_data')
-def parse_data(self, data):
-    print("============== %r", data)
+@celery_app.task(bind=True, name='crawl_url', max_retries=10)
+def crawl_url(self, url, required_class, label, scroll_to_bottom=False):
+    global SELENIUM_DRIVER
+    logging.warning('Executing task id {0.id}, args: {0.args!r} kwargs: {0.kwargs!r}'.format(self.request))
+    try:
+        if SELENIUM_DRIVER:
+            driver = SELENIUM_DRIVER
+        else:
+            SELENIUM_DRIVER = create_driver()
+            driver = SELENIUM_DRIVER
+        driver.get(url)
+    except WebDriverException as exc:
+        SELENIUM_DRIVER = create_driver()
+        print("Chrome not reachable")
+        raise self.retry(exc=exc, countdown=10)
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.CLASS_NAME, required_class)))
+        logging.warning("Page is ready! Start crawling...")
+        if scroll_to_bottom:
+            logging.warning("Scrolling to bottom...")
+            scroll_down_page(driver)
+        logging.warning("Page crawled successfully")
+        source_code = driver.page_source
+        response = {
+            "url": url,
+            "label": label,
+            "raw_data": source_code
+        }
+    except TimeoutException as exc:
+        logging.warning("Load page took too long... Retrying in 5 seconds...")
+        raise self.retry(exc=exc, countdown=10)
+    except WebDriverException as exc:
+        logging.warning("Error while crawling %r... retrying...", url)
+        raise self.retry(exc=exc, countdown=10)
+
+    elk_logger.info(response)
+    return response
