@@ -1,5 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 
+from django.core.mail import send_mail
+
 from datetime import datetime, timedelta
 
 from selenium.webdriver.support.ui import WebDriverWait
@@ -112,30 +114,55 @@ def get_product_detail(self, data):
         )
 
 
+@celery_app.task(bind=True, name='on_finish')
+def on_finish(self, data):
+    driver = SELENIUM_DRIVER
+    driver.quit()
+    send_mail(
+        'Crawl website successfully',
+        'Please go to http://localhost:8000/shopee/results/%s to see list items' % self.request.root_id,
+        'from@example.com',
+        ['khtrinh.tran@gmail.com'],
+        fail_silently=False,
+    )
+
+
 @celery_app.task(bind=True, name='get_products_url')
 def get_products_url(self, data):
     # Return list product url from result page crawled
     html_doc = data.get('raw_data')
     soup = BeautifulSoup(html_doc, 'html.parser')
     items_container = soup.findChild("div", {"class": "shopee-search-item-result__items"})
-    item_urls = items_container.find_all('a')
+    item_urls = items_container.find_all('a')[:1]
     urls = []
-    logging.warning("loop...")
     for item_url in item_urls:
-        celery_app.send_task(
-            "crawl_url",
-            queue='priority.high',
-            kwargs={
-                'url': 'http://shopee.vn' + item_url.get('href'),
-                'required_class': '_3n5NQx',
-                'label': 'crawling_product_detail',
-            },
-            countdown=30,
-            link=get_product_detail.s(),
-            expires=datetime.now() + timedelta(days=1)
-        )
+    #     tasks.append(celery_app.send_task(
+    #         "crawl_url",
+    #         queue='priority.high',
+    #         kwargs={
+    #             'url': 'http://shopee.vn' + item_url.get('href'),
+    #             'required_class': '_3n5NQx',
+    #             'label': 'crawling_product_detail',
+    #         },
+    #         countdown=30,
+    #         link=get_product_detail.s(),
+    #         expires=datetime.now() + timedelta(days=1)
+    #     ))
         urls.append(item_url.get('href'))
     logging.warning("end loop...")
+
+    from celery import chord
+    chord(crawl_url.subtask(
+        queue='priority.high',
+        kwargs={
+            'url': 'http://shopee.vn' + item_url.get('href'),
+            'required_class': '_3n5NQx',
+            'label': 'crawling_product_detail',
+        },
+        countdown=30,
+        link=get_product_detail.s(),
+        expires=datetime.now() + timedelta(days=1)
+    ) for item_url in item_urls)(on_finish.s())
 
     response = {
         'search_url': data.get('url'),
@@ -150,6 +177,7 @@ def get_products_url(self, data):
 def crawl_url(self, url, required_class, label, scroll_to_bottom=False):
     global SELENIUM_DRIVER
     logging.warning('Executing task id {0.id}, args: {0.args!r} kwargs: {0.kwargs!r}'.format(self.request))
+
     try:
         if SELENIUM_DRIVER:
             driver = SELENIUM_DRIVER

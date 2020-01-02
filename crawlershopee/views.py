@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 import ast
 
-from rest_framework import generics, views
+from rest_framework import views
 from rest_framework.response import Response
 
 from crawler.settings import ELK_HOST
-from crawlershopee.models import ShopeeModel
-from crawlershopee.serializers import ShopeeModelGetSerializer
 
 from crawlershopee.tasks import crawl_url, get_products_url
 
@@ -14,11 +12,6 @@ from requests.utils import requote_uri
 
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import Search
-
-
-class CrawlerShopeeView(generics.ListAPIView):
-    queryset = ShopeeModel.objects.all()
-    serializer_class = ShopeeModelGetSerializer
 
 
 class CrawlerShopeeGetData(views.APIView):
@@ -42,6 +35,7 @@ class CrawlerShopeeGetData(views.APIView):
 class CrawlResult(views.APIView):
 
     def get(self, request, *args, **kwargs):
+        # FIXME try to use django-rest-elasticsearch instead
         page = int(request.GET.get('page')) if request.GET.get('page') else 0
         limit = int(request.GET.get('limit')) if request.GET.get('limit') else 20
         task_id = kwargs.get('task_id')
@@ -49,7 +43,9 @@ class CrawlResult(views.APIView):
 
         s = Search(
             using=client,
-            index="logstash*").filter("match", task_id=task_id)[(page * limit): (page * limit + limit)]
+            index="logstash*"
+        ).filter("match", task_id=task_id)[(page * limit): (page * limit + limit)]
+
         elk_response = s.execute()
         items = []
         total = elk_response.hits.total
@@ -59,7 +55,11 @@ class CrawlResult(views.APIView):
         return Response({
             'total': total.value,
             'limit': limit,
-            'next': '' if ((page * limit + limit) > total.value) else ("http://%s%s?page=%s&limit=%s" % (
-                request.META.get('HTTP_HOST'), request.META.get('PATH_INFO'), page + 1, limit)),
+            'next': '' if (
+                    (page * limit + limit) > total.value
+            ) else (
+                    "http://%s%s?page=%s&limit=%s" %
+                    (request.META.get('HTTP_HOST'), request.META.get('PATH_INFO'), page + 1, limit)
+            ),
             'items': items
         })
