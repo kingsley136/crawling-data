@@ -199,7 +199,7 @@ def on_finish_crawl_shopee(self, data):
         driver.quit()
     send_mail(
         'Crawl website successfully',
-        'Please go to http://localhost:8000/shopee/results/%s to see list items' % self.request.root_id,
+        'Please go to http://localhost:8000/results/%s to see list items' % self.request.root_id,
         'from@example.com',
         ['khtrinh.tran@gmail.com'],
         fail_silently=False,

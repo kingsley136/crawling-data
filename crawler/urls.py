@@ -15,10 +15,12 @@ Including another URLconf
 """
 from django.conf.urls import url
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from . import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     url('tiki/', include('crawlertiki.urls')),
-    url('shopee/', include('crawlershopee.urls'))
+    url('shopee/', include('crawlershopee.urls')),
+    re_path(r'^results/(?P<task_id>.+)?$', views.CrawlResult.as_view())
 ]
