@@ -1,16 +1,10 @@
 # -*- coding: utf-8 -*-
-
 from rest_framework import views
 from rest_framework.response import Response
-
-from crawler.settings import ELK_HOST
 
 from crawlertiki.tasks import craw_tiki_url, get_tiki_products_url
 
 from requests.utils import requote_uri
-
-from elasticsearch import Elasticsearch
-from elasticsearch_dsl import Search
 
 
 class CrawlerTikiGetData(views.APIView):

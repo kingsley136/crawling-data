@@ -8,11 +8,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException, WebDriverException
-from selenium.webdriver import DesiredCapabilities
-from selenium import webdriver
 
 from logging import getLogger
-from celery.utils.log import get_task_logger
 from bs4 import BeautifulSoup
 
 import logging
@@ -20,45 +17,13 @@ import time
 import re
 
 from crawler import celery_app
+from crawler.utils import scroll_down_page, get_price, create_driver
 
 elk_logger = getLogger('django.request')
 
-celery_logger = get_task_logger(__name__)
-
-
 SELENIUM_DRIVER = None
 
-
-def create_driver():
-    return webdriver.Remote(
-        command_executor='http://selenium:4444/wd/hub',
-        desired_capabilities=DesiredCapabilities.CHROME,
-    )
-
-
-def scroll_down_page(driver, speed=100):
-    current_scroll_position, new_height = 0, 1
-    while current_scroll_position <= new_height:
-        current_scroll_position += speed
-        driver.execute_script("window.scrollTo(0, {});".format(current_scroll_position))
-        new_height = driver.execute_script("return document.body.scrollHeight")
-
-
-def get_price(price_string):
-    if '-' in price_string:
-        prices = price_string.split('-')
-        min_price = prices[0]
-        max_price = prices[1]
-        return {
-            'min': int(min_price.split('₫')[0].replace('.', '').replace('đ', '')),
-            'max': int(max_price.split('₫')[0].replace('.', '').replace('đ', ''))
-        }
-    else:
-        # FIXME Optimize
-        return {
-            'min': int(price_string.split('₫')[0].replace('.', '').replace('đ', '')),
-            'max': int(price_string.split('₫')[0].replace('.', '').replace('đ', ''))
-        }
+# FIXME Create base class task
 
 
 @celery_app.task(bind=True, name='craw_tiki_url', max_retries=10)

@@ -1,17 +1,10 @@
 # -*- coding: utf-8 -*-
-import ast
-
 from rest_framework import views
 from rest_framework.response import Response
-
-from crawler.settings import ELK_HOST
 
 from crawlershopee.tasks import crawl_shopee_url, get_shopee_products_url
 
 from requests.utils import requote_uri
-
-from elasticsearch import Elasticsearch
-from elasticsearch_dsl import Search
 
 
 class CrawlerShopeeGetData(views.APIView):
