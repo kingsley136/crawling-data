@@ -5,7 +5,7 @@ from rest_framework.response import Response
 
 from crawler.settings import ELK_HOST
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, RequestError
 from elasticsearch_dsl import Search
 
 
@@ -15,15 +15,32 @@ class CrawlResult(views.APIView):
         # FIXME try to use django-rest-elasticsearch instead
         page = int(request.GET.get('page')) if request.GET.get('page') else 0
         limit = int(request.GET.get('limit')) if request.GET.get('limit') else 20
+        if request.GET.get('order'):
+            field, order = request.GET.get('order').split(',')
+            sort_option = {
+                field: {
+                    "order": order
+                }
+            }
+        else:
+            sort_option = {}
         task_id = kwargs.get('task_id')
         client = Elasticsearch(hosts=[ELK_HOST + ':9200'], http_auth=('elastic', 'L5M3LPXk6QhxTyZenwo5'))
 
         s = Search(
             using=client,
             index="logstash*"
-        ).filter("match", task_id=task_id)[(page * limit): (page * limit + limit)]
+        ).filter("match", task_id=task_id).sort(
+            sort_option
+        )[(page * limit): (page * limit + limit)]
 
-        elk_response = s.execute()
+        try:
+            elk_response = s.execute()
+        except RequestError as exc:
+            return Response({
+                "Message": "Wrong query!"
+            })
+
         items = []
         total = elk_response.hits.total
         for hit in elk_response:
