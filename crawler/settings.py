@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     'crawlershopee'
 ]
 
-ELK_HOST = '192.168.0.104'
+ELK_HOST = '192.168.1.172'
 
 LOGGING = {
   'version': 1,

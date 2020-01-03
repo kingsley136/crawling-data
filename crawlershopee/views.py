@@ -24,7 +24,7 @@ class CrawlerShopeeGetData(views.APIView):
                 'url': url,
                 'required_class': 'shopee-search-item-result__item',
                 'scroll_to_bottom': True,
-                'label': 'crawling_search_result',
+                'label': 'shopee_crawling_search_result',
             },
             link=get_products_url.s()
         )

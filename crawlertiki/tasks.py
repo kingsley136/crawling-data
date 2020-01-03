@@ -41,7 +41,6 @@ def scroll_down_page(driver, speed=100):
         current_scroll_position += speed
         driver.execute_script("window.scrollTo(0, {});".format(current_scroll_position))
         new_height = driver.execute_script("return document.body.scrollHeight")
-    time.sleep(2)
 
 
 def get_price(price_string):
@@ -50,13 +49,14 @@ def get_price(price_string):
         min_price = prices[0]
         max_price = prices[1]
         return {
-            'min': int(min_price.split('₫')[1].replace('.', '')),
-            'max': int(max_price.split('₫')[1].replace('.', ''))
+            'min': int(min_price.split('₫')[0].replace('.', '').replace('đ', '')),
+            'max': int(max_price.split('₫')[0].replace('.', '').replace('đ', ''))
         }
     else:
+        # FIXME Optimize
         return {
-            'min': int(price_string.split('₫')[1].replace('.', '')),
-            'max': int(price_string.split('₫')[1].replace('.', ''))
+            'min': int(price_string.split('₫')[0].replace('.', '').replace('đ', '')),
+            'max': int(price_string.split('₫')[0].replace('.', '').replace('đ', ''))
         }
 
 
@@ -66,17 +66,18 @@ def get_product_detail(self, data):
     html_doc = data.get('raw_data')
     if html_doc:
         soup = BeautifulSoup(html_doc, 'html.parser')
-        categories_html = soup.findAll("a", {"class": "JFOy4z _20XOUy"})
+        categories_container = soup.findChild("ul", {"class": "breadcrumb"})
         categories = []
-        for category_html in categories_html:
-            categories.append(category_html.text)
-        title = soup.findChild("span", {"class": "OSgLcw"})
-        gross_price = soup.findChild("div", {"class": "_3_ISdg"})
-        net_price = soup.findChild("div", {"class": "_3n5NQx"})
+        for category in categories_container.find_all("a"):
+            categories.append(category.text)
+
+        title = soup.findChild("h1", {"id": "product-name"})
+        gross_price = soup.findChild("span", {"id": "span-list-price"})
+        net_price = soup.findChild("span", {"id": "span-price"})
         try:
             item_info = {
                 "url": data.get('url'),
-                "title": title.text,
+                "title": title.text.replace('\n', ''),
                 "gross_price": get_price(gross_price.text) if gross_price else get_price(net_price.text),
                 "net_price": get_price(net_price.text),
                 "categories": categories
@@ -92,21 +93,22 @@ def get_product_detail(self, data):
                 queue='priority.high',
                 kwargs={
                     'url': data.get('url'),
-                    'required_class': '_3n5NQx',
-                    'label': 'crawling_product_detail',
+                    'required_class': 'item-name',
+                    'label': 'tiki_crawling_product_detail',
                 },
                 countdown=30,
                 link=get_product_detail.s(),
                 expires=datetime.now() + timedelta(days=1)
             )
+
     else:
         celery_app.send_task(
             "crawl_url",
             queue='priority.high',
             kwargs={
                 'url': data.get('url'),
-                'required_class': '_3n5NQx',
-                'label': 'crawling_product_detail',
+                'required_class': 'item-name',
+                'label': 'tiki_crawling_product_detail',
             },
             countdown=30,
             link=get_product_detail.s(),
@@ -121,7 +123,7 @@ def on_finish(self, data):
         driver.quit()
     send_mail(
         'Crawl website successfully',
-        'Please go to http://localhost:8000/shopee/results/%s to see list items' % self.request.root_id,
+        'Please go to http://localhost:8000/tiki/results/%s to see list items' % self.request.root_id,
         'from@example.com',
         ['khtrinh.tran@gmail.com'],
         fail_silently=False,
@@ -133,22 +135,11 @@ def get_products_url(self, data):
     # Return list product url from result page crawled
     html_doc = data.get('raw_data')
     soup = BeautifulSoup(html_doc, 'html.parser')
-    items_container = soup.findChild("div", {"class": "shopee-search-item-result__items"})
+    items_container = soup.findChild("div", {"class": "product-box-list"})
+    time.sleep(5)
     item_urls = items_container.find_all('a')[:1]
     urls = []
     for item_url in item_urls:
-    #     tasks.append(celery_app.send_task(
-    #         "crawl_url",
-    #         queue='priority.high',
-    #         kwargs={
-    #             'url': 'http://shopee.vn' + item_url.get('href'),
-    #             'required_class': '_3n5NQx',
-    #             'label': 'crawling_product_detail',
-    #         },
-    #         countdown=30,
-    #         link=get_product_detail.s(),
-    #         expires=datetime.now() + timedelta(days=1)
-    #     ))
         urls.append(item_url.get('href'))
     logging.warning("end loop...")
 
@@ -156,9 +147,9 @@ def get_products_url(self, data):
     chord(crawl_url.subtask(
         queue='priority.high',
         kwargs={
-            'url': 'http://shopee.vn' + item_url.get('href'),
-            'required_class': '_3n5NQx',
-            'label': 'crawling_product_detail',
+            'url': item_url.get('href'),
+            'required_class': 'item-name',
+            'label': 'tiki_crawling_product_detail',
         },
         countdown=30,
         link=get_product_detail.s(),
