@@ -1,5 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 
+import re
+
 from django.core.mail import send_mail
 
 from datetime import datetime, timedelta
@@ -24,15 +26,14 @@ elk_logger = getLogger('django.request')
 
 celery_logger = get_task_logger(__name__)
 
+SELENIUM_DRIVER = None
+
 
 def create_driver():
     return webdriver.Remote(
         command_executor='http://selenium:4444/wd/hub',
         desired_capabilities=DesiredCapabilities.CHROME,
     )
-
-
-SELENIUM_DRIVER = None
 
 
 def scroll_down_page(driver, speed=100):
@@ -60,122 +61,8 @@ def get_price(price_string):
         }
 
 
-@celery_app.task(bind=True, name='get_product_detail')
-def get_product_detail(self, data):
-    logging.warning("Getting product data...")
-    html_doc = data.get('raw_data')
-    if html_doc:
-        soup = BeautifulSoup(html_doc, 'html.parser')
-        categories_html = soup.findAll("a", {"class": "JFOy4z _20XOUy"})
-        categories = []
-        for category_html in categories_html:
-            categories.append(category_html.text)
-        title = soup.findChild("span", {"class": "OSgLcw"})
-        gross_price = soup.findChild("div", {"class": "_3_ISdg"})
-        net_price = soup.findChild("div", {"class": "_3n5NQx"})
-        try:
-            item_info = {
-                "url": data.get('url'),
-                "title": title.text,
-                "gross_price": get_price(gross_price.text) if gross_price else get_price(net_price.text),
-                "net_price": get_price(net_price.text),
-                "categories": categories
-            }
-            elk_logger.info(msg=item_info, extra={
-                'task_id': self.request.root_id
-            })
-            return item_info
-        except AttributeError as exc:
-            print("Error while parsing data, crawl again...")
-            celery_app.send_task(
-                "crawl_url",
-                queue='priority.high',
-                kwargs={
-                    'url': data.get('url'),
-                    'required_class': '_3n5NQx',
-                    'label': 'crawling_product_detail',
-                },
-                countdown=30,
-                link=get_product_detail.s(),
-                expires=datetime.now() + timedelta(days=1)
-            )
-    else:
-        celery_app.send_task(
-            "crawl_url",
-            queue='priority.high',
-            kwargs={
-                'url': data.get('url'),
-                'required_class': '_3n5NQx',
-                'label': 'crawling_product_detail',
-            },
-            countdown=30,
-            link=get_product_detail.s(),
-            expires=datetime.now() + timedelta(days=1)
-        )
-
-
-@celery_app.task(bind=True, name='on_finish')
-def on_finish(self, data):
-    driver = SELENIUM_DRIVER
-    if driver:
-        driver.quit()
-    send_mail(
-        'Crawl website successfully',
-        'Please go to http://localhost:8000/shopee/results/%s to see list items' % self.request.root_id,
-        'from@example.com',
-        ['khtrinh.tran@gmail.com'],
-        fail_silently=False,
-    )
-
-
-@celery_app.task(bind=True, name='get_products_url')
-def get_products_url(self, data):
-    # Return list product url from result page crawled
-    html_doc = data.get('raw_data')
-    soup = BeautifulSoup(html_doc, 'html.parser')
-    items_container = soup.findChild("div", {"class": "shopee-search-item-result__items"})
-    item_urls = items_container.find_all('a')[:1]
-    urls = []
-    for item_url in item_urls:
-    #     tasks.append(celery_app.send_task(
-    #         "crawl_url",
-    #         queue='priority.high',
-    #         kwargs={
-    #             'url': 'http://shopee.vn' + item_url.get('href'),
-    #             'required_class': '_3n5NQx',
-    #             'label': 'crawling_product_detail',
-    #         },
-    #         countdown=30,
-    #         link=get_product_detail.s(),
-    #         expires=datetime.now() + timedelta(days=1)
-    #     ))
-        urls.append(item_url.get('href'))
-    logging.warning("end loop...")
-
-    from celery import chord
-    chord(crawl_url.subtask(
-        queue='priority.high',
-        kwargs={
-            'url': 'http://shopee.vn' + item_url.get('href'),
-            'required_class': '_3n5NQx',
-            'label': 'crawling_product_detail',
-        },
-        countdown=30,
-        link=get_product_detail.s(),
-        expires=datetime.now() + timedelta(days=1)
-    ) for item_url in item_urls)(on_finish.s())
-
-    response = {
-        'search_url': data.get('url'),
-        'prods_urls': urls
-    }
-    elk_logger.info(response)
-
-    return response
-
-
-@celery_app.task(bind=True, name='crawl_url', max_retries=10)
-def crawl_url(self, url, required_class, label, scroll_to_bottom=False):
+@celery_app.task(bind=True, name='crawl_shopee_url', max_retries=10)
+def crawl_shopee_url(self, url, required_class, label, scroll_to_bottom=False):
     global SELENIUM_DRIVER
     logging.warning('Executing task id {0.id}, args: {0.args!r} kwargs: {0.kwargs!r}'.format(self.request))
 
@@ -213,3 +100,108 @@ def crawl_url(self, url, required_class, label, scroll_to_bottom=False):
 
     elk_logger.info(response)
     return response
+
+
+@celery_app.task(bind=True, name='get_shopee_products_url')
+def get_shopee_products_url(self, data):
+    # Return list product url from result page crawled
+    html_doc = data.get('raw_data')
+    soup = BeautifulSoup(html_doc, 'html.parser')
+    items_container = soup.findChild("div", {"class": "shopee-search-item-result__items"})
+
+    item_urls = items_container.find_all('a')[:10]
+    urls = []
+    for item_url in item_urls:
+        if re.match(r"^https?:\/\/(w{3}\.)?shopee.vn\/.*?$", item_url.get('href')):
+            urls.append(item_url.get('href'))
+    logging.warning("end loop...")
+
+    from celery import chord
+    chord(crawl_shopee_url.subtask(
+        queue='priority.high',
+        kwargs={
+            'url': 'http://shopee.vn' + item_url.get('href'),
+            'required_class': '_3n5NQx',
+            'label': 'crawling_product_detail',
+        },
+        countdown=30,
+        link=get_shopee_product_detail.s(),
+        expires=datetime.now() + timedelta(days=1)
+    ) for item_url in item_urls)(on_finish_crawl_shopee.s())
+
+    response = {
+        'search_url': data.get('url'),
+        'prods_urls': urls
+    }
+    elk_logger.info(response)
+
+    return response
+
+
+@celery_app.task(bind=True, name='get_shopee_product_detail')
+def get_shopee_product_detail(self, data):
+    logging.warning("Getting product data...")
+    html_doc = data.get('raw_data')
+    if html_doc:
+        soup = BeautifulSoup(html_doc, 'html.parser')
+        categories_html = soup.findAll("a", {"class": "JFOy4z _20XOUy"})
+        categories = []
+        for category_html in categories_html:
+            categories.append(category_html.text)
+        title = soup.findChild("span", {"class": "OSgLcw"})
+        gross_price = soup.findChild("div", {"class": "_3_ISdg"})
+        net_price = soup.findChild("div", {"class": "_3n5NQx"})
+        try:
+            item_info = {
+                "url": data.get('url'),
+                "title": title.text.replace('\n', ''),
+                "gross_price": get_price(gross_price.text) if gross_price else get_price(net_price.text),
+                "net_price": get_price(net_price.text),
+                "categories": categories,
+                "type": "shopee",
+                'task_id': self.request.root_id
+            }
+            elk_logger.info(msg="Saved item " + data.get('url'), extra=item_info)
+            return item_info
+        except AttributeError as exc:
+            print("Error while parsing data, crawl again...")
+            celery_app.send_task(
+                "crawl_url",
+                queue='priority.high',
+                kwargs={
+                    'url': data.get('url'),
+                    'required_class': '_3n5NQx',
+                    'label': 'crawling_product_detail',
+                },
+                countdown=30,
+                link=get_shopee_product_detail.s(),
+                expires=datetime.now() + timedelta(days=1)
+            )
+    else:
+        celery_app.send_task(
+            "crawl_url",
+            queue='priority.high',
+            kwargs={
+                'url': data.get('url'),
+                'required_class': '_3n5NQx',
+                'label': 'crawling_product_detail',
+            },
+            countdown=30,
+            link=get_shopee_product_detail.s(),
+            expires=datetime.now() + timedelta(days=1)
+        )
+
+
+@celery_app.task(bind=True, name='on_finish_crawl_shopee')
+def on_finish_crawl_shopee(self, data):
+    driver = SELENIUM_DRIVER
+    if driver:
+        driver.quit()
+    send_mail(
+        'Crawl website successfully',
+        'Please go to http://localhost:8000/shopee/results/%s to see list items' % self.request.root_id,
+        'from@example.com',
+        ['khtrinh.tran@gmail.com'],
+        fail_silently=False,
+    )
+
