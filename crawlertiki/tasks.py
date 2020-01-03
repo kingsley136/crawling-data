@@ -137,7 +137,7 @@ def get_products_url(self, data):
     soup = BeautifulSoup(html_doc, 'html.parser')
     items_container = soup.findChild("div", {"class": "product-box-list"})
     time.sleep(5)
-    item_urls = items_container.find_all('a')[:1]
+    item_urls = items_container.find_all('a')
     urls = []
     for item_url in item_urls:
         urls.append(item_url.get('href'))
