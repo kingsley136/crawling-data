@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import logging
 
 from rest_framework import views
 from rest_framework.response import Response
@@ -7,6 +8,7 @@ from crawler.settings import ELK_HOST
 
 from elasticsearch import Elasticsearch, RequestError
 from elasticsearch_dsl import Search
+from elasticsearch_dsl.query import Match
 
 
 class CrawlResult(views.APIView):
@@ -24,19 +26,34 @@ class CrawlResult(views.APIView):
             }
         else:
             sort_option = {}
+
         task_id = kwargs.get('task_id')
         client = Elasticsearch(hosts=[ELK_HOST + ':9200'], http_auth=('elastic', 'L5M3LPXk6QhxTyZenwo5'))
 
         s = Search(
             using=client,
             index="logstash*"
-        ).filter("match", task_id=task_id).sort(
+        ).query(
+            "match",
+            task_id=task_id
+        )
+        if request.GET.get('category'):
+            s = s.query(
+                Match(
+                    categories={
+                        "query": request.GET.get('category')
+                    }
+                )
+            )
+
+        s = s.sort(
             sort_option
         )[(page * limit): (page * limit + limit)]
 
         try:
             elk_response = s.execute()
         except RequestError as exc:
+            logging.warning(exc)
             return Response({
                 "Message": "Wrong query!"
             })
@@ -46,7 +63,7 @@ class CrawlResult(views.APIView):
         for hit in elk_response:
             item = {
                 "categories": [category for category in hit.categories],
-                "title": hit.title,
+                "name": hit.title,
                 "gross_price": {
                     "min": hit.gross_price.min,
                     "max": hit.gross_price.max
@@ -55,6 +72,7 @@ class CrawlResult(views.APIView):
                     "min": hit.net_price.min,
                     "max": hit.net_price.max
                 },
+                "price": hit.net_price.min,
                 "source": hit.type,
                 "url": hit.url
             }
