@@ -22,5 +22,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     url('tiki/', include('crawlertiki.urls')),
     url('shopee/', include('crawlershopee.urls')),
+    re_path(r'^results/(?P<task_id>.+)/graph/?$', views.CrawlGraphResult.as_view()),
     re_path(r'^results/(?P<task_id>.+)?$', views.CrawlResult.as_view())
 ]

@@ -52,8 +52,8 @@ LOGGING = {
             'level': 'INFO',
             'class': 'logstash.TCPLogstashHandler',
             'host': ELK_HOST,
-            'port': 5000, # Default value: 5959
-            'version': 1, # Version of logstash event schema. Default value: 0 (for backward compatibility of the library)
+            'port': 5000,  # Default value: 5959
+            'version': 1,  # Version of logstash event schema. Default value: 0 (for backward compatibility of the library)
             'message_type': 'logstash',  # 'type' field in logstash message. Default value: 'logstash'.
             'fqdn': True, # Fully qualified domain name. Default value: false.
             'tags': ['django.request'], # list of tags. Default: None.
@@ -84,10 +84,14 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'crawler.urls'
 
+SETTINGS_PATH = os.path.dirname(os.path.dirname(__file__))
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [
+            os.path.join(SETTINGS_PATH, 'templates'),
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
