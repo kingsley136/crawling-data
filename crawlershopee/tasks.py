@@ -4,6 +4,8 @@ from django.core.mail import send_mail
 
 from datetime import datetime, timedelta
 
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -162,11 +164,21 @@ def on_finish_crawl_shopee(self, data):
     driver = SELENIUM_DRIVER
     if driver:
         driver.quit()
+    subject = 'Your request(#%s) finished successfully!' % self.request.root_id
+    html_message = render_to_string('email_template.html', {
+        'graph_url': 'http://localhost:8000/results/%s/graph' % self.request.root_id,
+        'url': 'http://localhost:8000/results/%s' % self.request.root_id
+    })
+    plain_message = strip_tags(html_message)
+    from_email = 'no_reply@2code.io'
+    to_email = 'khtrinh.tran@gmail.com'
+
     send_mail(
-        'Crawl website successfully',
-        'Please go to http://localhost:8000/results/%s to see list items' % self.request.root_id,
-        'from@example.com',
-        ['khtrinh.tran@gmail.com'],
-        fail_silently=False,
+        subject,
+        plain_message,
+        from_email,
+        [to_email],
+        html_message=html_message,
+
     )
 

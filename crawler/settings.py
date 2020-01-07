@@ -166,10 +166,7 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 
 if DEBUG:
-    EMAIL_HOST = 'localhost'
-    EMAIL_PORT = 1025
-    EMAIL_HOST_USER = ''
-    EMAIL_HOST_PASSWORD = ''
-    EMAIL_USE_TLS = False
-    DEFAULT_FROM_EMAIL = 'admin@example.com'
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    EMAIL_HOST = 'smtp.mailtrap.io'
+    EMAIL_HOST_USER = '22d9295f1bcd78'
+    EMAIL_HOST_PASSWORD = 'd433669719efc8'
+    EMAIL_PORT = '2525'
