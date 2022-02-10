@@ -9,7 +9,7 @@ chardet==3.0.4
 colorama==0.4.3
 configparser==4.0.2
 crayons==0.3.0
-Django==2.2.7
+Django==2.2.27
 django-celery-results==1.1.2
 django-elasticsearch-dsl==7.1.0
 django-filter==2.2.0
